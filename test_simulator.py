@@ -4,69 +4,25 @@
 
 import json
 import time
+import sys
 
 import mozlog.structured
 from marionette_harness import MarionetteTestCase
+from marionette_driver.errors import ScriptTimeoutException
 from marionette_driver.errors import TimeoutException
 from marionette_driver.errors import InsecureCertificateException
 
 # Change these parameters for your test
 
-PAGES = [
-    "https://google.com",
-    "https://youtube.com",
-    "https://facebook.com",
-    "https://baidu.com",
-    "https://wikipedia.org",
-    "https://yahoo.com",
-    "http://qq.com",
-    "https://amazon.com",
-    "https://taobao.com",
-    "https://tmall.com",
-    "https://twitter.com",
-    "https://instagram.com",
-    "https://google.co.in",
-    "https://sohu.com",
-    "http://live.com",
-    "https://jd.com",
-    "https://vk.com",
-    "https://reddit.com",
-    "https://sina.com",
-    "https://weibo.com",
-    "https://google.co.jp",
-    "https://360.cn",
-    "https://login.tmall.com",
-    "https://blogspot.com",
-    "https://yandex.ru",
-    "https://google.ru",
-    "https://netflix.com",
-    "https://google.co.uk",
-    "https://google.com.br",
-    "https://google.com.hk",
-    "https://linkedin.com",
-    "https://csdn.net",
-    "https://t.co",
-    "https://google.fr",
-    "https://ebay.com",
-    "https://alipay.com",
-    "https://twitch.tv",
-    "https://google.de",
-    "https://pages.tmall.com",
-    "https://microsoft.com",
-    "https://bing.com",
-    "https://msn.com",
-    "https://mail.ru",
-    "https://wikia.com",
-    "https://naver.com",
-    "https://aliexpress.com",
-]
+PAGE_SET = "sets/alexa50.json"
 PROCESS = "content"
 HISTOGRAMS = [
-    "CONTENT_PAINT_TIME",
-    "GFX_OMTP_PAINT_WAIT_TIME",
-    "CONTENT_LARGE_PAINT_PHASE_WEIGHT",
-    "CONTENT_SMALL_PAINT_PHASE_WEIGHT",
+    "DRAW_COMMAND_SIZE",
+    "DRAW_COMMAND_COUNT",
+    "DRAW_COMMAND_DISTRIBUTION_SMALL",
+    "DRAW_COMMAND_DISTRIBUTION_LARGE",
 ]
+ITERATIONS = 1
 
 # Internal constants
 
@@ -81,10 +37,10 @@ let de = document.documentElement;
 let pageHeight = de.scrollHeight;
 
 function isAtBottom() {
-    return de.scrollTop >= (pageHeight - window.innerHeight - 0.5);
+    return de.scrollTop >= (pageHeight - window.innerHeight - 2);
 }
 function isAtTop() {
-    return de.scrollTop <= 0.5;
+    return de.scrollTop <= 2;
 }
 
 whileScrollingBottom = function() {
@@ -117,13 +73,16 @@ class SimulatorTestCase(MarionetteTestCase):
         MarionetteTestCase.setUp(self)
         self.logger = mozlog.structured.structuredlog.get_default_logger()
 
+        with open(PAGE_SET) as page_set:
+            self.pages = json.load(page_set)
+
         self.marionette.set_context('chrome')
         self.marionette.timeout.page_load = 20
         self.marionette.execute_script(CLEAR_PING_SCRIPT)
         self.logger.info("cleared telemetry ping")
 
     def test_simulation(self):
-        for page in PAGES:
+        for page in self.pages * ITERATIONS:
             with self.marionette.using_context('content'):
                 self.logger.info("loading %s" % page)
                 try:
@@ -132,10 +91,8 @@ class SimulatorTestCase(MarionetteTestCase):
                     time.sleep(2)
                     self.marionette.execute_async_script(INTERACT_SCRIPT)
                     self.logger.info("interacted!")
-                except TimeoutException as exc:
-                    self.logger.info("navigating to %s hit timeout" % page)
-                except InsecureCertificateException as exc:
-                    self.logger.info("navigating to %s hit insecure certificate" % page)
+                except:
+                    self.logger.info("caught %s" % sys.exc_info()[0])
 
     def tearDown(self):
         self.logger.info("finished loading pages")
@@ -155,7 +112,7 @@ class SimulatorTestCase(MarionetteTestCase):
             json.dump(histograms, out, sort_keys=True, indent=2)
 
         with open('histograms.txt', 'w') as out:
-            for name, histogram in histograms.items():
+            for name, histogram in sorted(histograms.items()):
                 rendered = self.renderHistogram(name, histogram)
                 print >> out, rendered
 
