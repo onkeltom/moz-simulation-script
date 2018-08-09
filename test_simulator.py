@@ -17,12 +17,13 @@ from marionette_driver.errors import InsecureCertificateException
 PAGE_SET = "sets/alexa50.json"
 PROCESS = "content"
 HISTOGRAMS = [
-    "DRAW_COMMAND_SIZE",
-    "DRAW_COMMAND_COUNT",
-    "DRAW_COMMAND_DISTRIBUTION_SMALL",
-    "DRAW_COMMAND_DISTRIBUTION_LARGE",
+    "CONTENT_PAINT_TIME",
+    "GFX_OMTP_PAINT_WAIT_TIME",
 ]
-ITERATIONS = 1
+SCALARS = [
+    "gfx.omtp.paint_wait_ratio",
+]
+ITERATIONS = 2
 
 # Internal constants
 
@@ -102,14 +103,21 @@ class SimulatorTestCase(MarionetteTestCase):
         self.logger.info("retrieved telemetry ping")
 
         histograms = {}
+        scalars = {}
+
         for name in HISTOGRAMS:
             histogramSet = self.findHistograms(ping, PROCESS, name)
             for name, histogram in histogramSet.items():
                 self.expandHistogram(histogram)
                 histograms[name] = histogram
 
+        for name in SCALARS:
+            scalars[name] = self.findScalar(ping, PROCESS, name)
+
         with open('histograms.json', 'w') as out:
             json.dump(histograms, out, sort_keys=True, indent=2)
+        with open('scalars.json', 'w') as out:
+            json.dump(scalars, out, sort_keys=True, indent=2)
 
         with open('histograms.txt', 'w') as out:
             for name, histogram in sorted(histograms.items()):
@@ -141,6 +149,22 @@ class SimulatorTestCase(MarionetteTestCase):
                 results[joinedName] = histogram
 
         return results
+
+    # TODO: Add support for keyed scalars
+    def findScalar(self, ping, process, name):
+        payload = ping["payload"]
+
+        scalars = {}
+        if process == "parent":
+            scalars = payload["scalars"]
+        elif process in payload["processes"]:
+            scalars = payload["processes"][process]["scalars"]
+
+        if name in scalars:
+            return scalars[name]
+        else:
+            return None
+
 
     def expandHistogram(self, histogram):
         sampleCount = 0
