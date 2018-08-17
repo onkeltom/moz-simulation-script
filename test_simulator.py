@@ -3,8 +3,9 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import json
-import time
+import os
 import sys
+import time
 
 import mozlog.structured
 from marionette_harness import MarionetteTestCase
@@ -15,15 +16,22 @@ from marionette_driver.errors import InsecureCertificateException
 # Change these parameters for your test
 
 PAGE_SET = "sets/alexa50.json"
-PROCESS = "content"
 HISTOGRAMS = [
-    "CONTENT_PAINT_TIME",
-    "GFX_OMTP_PAINT_WAIT_TIME",
+    ("CHECKERBOARD_PEAK", "gpu"),
+    ("CHECKERBOARD_SEVERITY", "gpu"),
+    ("CHECKERBOARD_DURATION", "gpu"),
+    ("COMPOSITE_TIME", "gpu"),
+    ("CONTENT_FRAME_TIME", "gpu"),
+    ("WR_RENDER_TIME", "gpu"),
+    ("WR_SCENEBUILD_TIME", "gpu"),
+    ("WR_SCENESWAP_TIME", "gpu"),
+    ("CONTENT_PAINT_TIME", "content"),
+    ("GFX_OMTP_PAINT_WAIT_TIME", "content")
 ]
 SCALARS = [
-    "gfx.omtp.paint_wait_ratio",
+    ("gfx.omtp.paint_wait_ratio", "content"),
 ]
-ITERATIONS = 2
+ITERATIONS = 3
 
 # Internal constants
 
@@ -34,35 +42,83 @@ TelemetrySend.clearCurrentPings();
 """
 INTERACT_SCRIPT = """
 let [resolve] = arguments;
-let de = document.documentElement;
-let pageHeight = de.scrollHeight;
 
-function isAtBottom() {
-    return de.scrollTop >= (pageHeight - window.innerHeight - 2);
-}
-function isAtTop() {
-    return de.scrollTop <= 2;
+function asyncScrollTo(document, target) {
+    return new Promise((resolve, reject) => {
+        let de = document.documentElement;
+        let timeoutId = 0;
+        let attemptsLeft = 5;
+        function isAtTarget() {
+            return Math.abs(de.scrollTop - target) < 2;
+        }
+        function scrollListener(target) {
+            if (isAtTarget()) {
+                clearTimeout(timeoutId);
+                removeEventListener('scroll', scrollListener);
+                resolve();
+            }
+        }
+        function scrollTimeout() {
+            clearTimeout(timeoutId);
+            removeEventListener('scroll', scrollListener);
+            attemptScroll();
+        }
+        function attemptScroll() {
+            if (attemptsLeft === 0) {
+                reject();
+                return;
+            }
+            attemptsLeft -= 1;
+
+            // TODO: window.scrollMaxY is non-standard
+            target = Math.min(Math.max(target, 0), window.scrollMaxY);
+
+            timeoutId = setTimeout(scrollTimeout, 1500);
+            addEventListener('scroll', scrollListener);
+
+            de.scrollTo({left: 0, top: target, behavior: 'smooth'});
+        }
+        if (isAtTarget()) {
+            resolve();
+            return;
+        }
+        attemptScroll();
+    });
 }
 
-whileScrollingBottom = function() {
-    if (isAtBottom()) {
-        removeEventListener('scroll', whileScrollingBottom);
-        addEventListener('scroll', whileScrollingTop);
-        window.scrollBy({top: -pageHeight, behavior: 'smooth'});
+function asyncTimeout(millis) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            resolve();
+        }, millis);
+    });
+}
+
+function canScroll() {
+    return window.scrollMaxY > 10;
+}
+
+new Promise(async (resolve, reject) => {
+    if (!canScroll()) {
+        await asyncTimeout(1000);
+        if (!canScroll()) {
+            resolve();
+            return;
+        }
     }
-};
-whileScrollingTop = function() {
-    if (isAtTop()) {
-        resolve(1);
-    }
-};
-
-if (isAtBottom()) {
-    resolve(1);
-}
-
-addEventListener('scroll', whileScrollingBottom);
-window.scrollBy({top: pageHeight, behavior: 'smooth'});
+    await asyncScrollTo(document, window.scrollMaxY);
+    await asyncTimeout(500);
+    await asyncScrollTo(document, 0);
+    await asyncTimeout(500);
+    await asyncScrollTo(document, window.scrollMaxY / 2);
+    await asyncTimeout(500);
+    await asyncScrollTo(document, 0);
+    await asyncTimeout(500);
+    await asyncScrollTo(document, window.scrollMaxY);
+    await asyncTimeout(500);
+    await asyncScrollTo(document, 0);
+    resolve();
+}).then(() => { resolve(1) });
 """
 GET_PING_SCRIPT = """
 ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
@@ -89,7 +145,7 @@ class SimulatorTestCase(MarionetteTestCase):
                 try:
                     self.marionette.navigate(page)
                     self.logger.info("loaded!")
-                    time.sleep(2)
+                    time.sleep(1)
                     self.marionette.execute_async_script(INTERACT_SCRIPT)
                     self.logger.info("interacted!")
                 except:
@@ -100,26 +156,31 @@ class SimulatorTestCase(MarionetteTestCase):
         self.marionette.set_context('chrome')
         time.sleep(10)
         ping = self.marionette.execute_script(GET_PING_SCRIPT)
-        self.logger.info("retrieved telemetry ping")
+        self.logger.info("retrieved telemetry ping\n")
 
         histograms = {}
         scalars = {}
 
-        for name in HISTOGRAMS:
-            histogramSet = self.findHistograms(ping, PROCESS, name)
+        for name, process in HISTOGRAMS:
+            histogramSet = self.findHistograms(ping, process, name)
             for name, histogram in histogramSet.items():
                 self.expandHistogram(histogram)
                 histograms[name] = histogram
 
-        for name in SCALARS:
-            scalars[name] = self.findScalar(ping, PROCESS, name)
+        for name, process in SCALARS:
+            scalars[name] = self.findScalar(ping, process, name)
 
-        with open('histograms.json', 'w') as out:
+        try:
+            os.mkdir('run')
+        except:
+            pass
+        with open('run/ping.json', 'w') as out:
+            json.dump(ping, out, sort_keys=True, indent=2)
+        with open('run/histograms.json', 'w') as out:
             json.dump(histograms, out, sort_keys=True, indent=2)
-        with open('scalars.json', 'w') as out:
+        with open('run/scalars.json', 'w') as out:
             json.dump(scalars, out, sort_keys=True, indent=2)
-
-        with open('histograms.txt', 'w') as out:
+        with open('run/histograms.txt', 'w') as out:
             for name, histogram in sorted(histograms.items()):
                 rendered = self.renderHistogram(name, histogram)
                 print >> out, rendered
@@ -155,11 +216,8 @@ class SimulatorTestCase(MarionetteTestCase):
         payload = ping["payload"]
 
         scalars = {}
-        if process == "parent":
-            scalars = payload["scalars"]
-        elif process in payload["processes"]:
+        if process in payload["processes"]:
             scalars = payload["processes"][process]["scalars"]
-
         if name in scalars:
             return scalars[name]
         else:
