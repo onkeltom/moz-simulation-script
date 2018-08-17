@@ -17,7 +17,7 @@ scrolling a page up and down with a predefined pageset in Firefox.
 	1. (Optional) Use `--pref pref.name:pref-value` to control behavior between runs
 
 The script will output a folder `run` with results for the run
-	1. `ping.json` - The raw ping data
-	1. `histograms.json` - The raw selected histograms
-	1. `histograms.txt` - Formatted histograms
-	1. `scalars.json` - The raw selected scalars
+ 1. `ping.json` - The raw ping data
+ 1. `histograms.json` - The raw selected histograms
+ 1. `histograms.txt` - Formatted histograms
+ 1. `scalars.json` - The raw selected scalars
