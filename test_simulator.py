@@ -15,7 +15,7 @@ from marionette_driver.errors import InsecureCertificateException
 
 # Change these parameters for your test
 
-PAGE_SET = "sets/alexa50.json"
+PAGE_SET = "sets/media.json"
 HISTOGRAMS = [
     ("CHECKERBOARD_PEAK", "gpu"),
     ("CHECKERBOARD_SEVERITY", "gpu"),
